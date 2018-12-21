@@ -9,7 +9,7 @@ name = "bencode"
 path = "src/bencode.rs"
 
 [[bin]]
-name = "bt"
+name = "torrent"
 path = "src/main.rs"
 
 [dependencies]
