@@ -4,12 +4,4 @@ version = "0.1.0"
 authors = ["stephen <26316200+slo1@users.noreply.github.com>"]
 edition = "2018"
 
-[lib]
-name = "bencode"
-path = "src/bencode.rs"
-
-[[bin]]
-name = "torrent"
-path = "src/main.rs"
-
 [dependencies]
