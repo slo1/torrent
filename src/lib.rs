@@ -1,3 +1,5 @@
+extern crate sha1;
+
 use std::fmt;
 use std::str;
 
@@ -21,6 +23,7 @@ pub struct Info<'a> {
     pub pieces: Vec<&'a [u8]>,
     pub length: Option<i64>,
     pub files: Option<Vec<File>>,
+    pub hash: [u8; 20],
 }
 
 pub struct TorrentMetaInfo<'a> {
@@ -33,7 +36,11 @@ impl<'a> TorrentMetaInfo<'a> {
         contents: &'a [u8],
     ) -> Result<TorrentMetaInfo, Box<std::error::Error>> {
         let dict = match bencode::decode(&contents)? {
-            bencode::BencodeVal::Dict(d) => d,
+            bencode::BencodeVal::Dict {
+                index: _,
+                size: _,
+                dict,
+            } => dict,
             _ => {
                 return Err(From::from("should be a dictionary"));
             }
@@ -41,7 +48,11 @@ impl<'a> TorrentMetaInfo<'a> {
 
         let announce = match dict.get("announce".as_bytes()) {
             Some(v) => match v {
-                bencode::BencodeVal::Str(s) => str::from_utf8(s)?,
+                bencode::BencodeVal::Str {
+                    index: _,
+                    size: _,
+                    byte_str,
+                } => str::from_utf8(byte_str)?,
                 _ => {
                     return Err(From::from(
                         "announce should be a UTF-8 encoded string",
@@ -55,21 +66,34 @@ impl<'a> TorrentMetaInfo<'a> {
             }
         };
 
-        let info_dict = match dict.get("info".as_bytes()) {
-            Some(v) => match v {
-                bencode::BencodeVal::Dict(d) => d,
-                _ => return Err(From::from("info should be a dictionary")),
-            },
-            None => {
-                return Err(From::from(
-                    "info dict not found in metainfo dictionary",
-                ))
-            }
-        };
+        let (&info_dict_index, info_dict_size, info_dict) =
+            match dict.get("info".as_bytes()) {
+                Some(v) => match v {
+                    bencode::BencodeVal::Dict { index, dict, size } => {
+                        (index, size, dict)
+                    }
+                    _ => return Err(From::from("info should be a dictionary")),
+                },
+                None => {
+                    return Err(From::from(
+                        "info dict not found in metainfo dictionary",
+                    ))
+                }
+            };
+
+        let info_hash = sha1::Sha1::from(
+            &contents[info_dict_index..info_dict_index + info_dict_size],
+        )
+        .digest()
+        .bytes();
 
         let name = match info_dict.get("name".as_bytes()) {
             Some(v) => match v {
-                bencode::BencodeVal::Str(s) => str::from_utf8(s)?,
+                bencode::BencodeVal::Str {
+                    index: _,
+                    byte_str,
+                    size: _,
+                } => str::from_utf8(byte_str)?,
                 _ => {
                     return Err(From::from(
                         "name should be a UTF-8 encoded string",
@@ -83,7 +107,11 @@ impl<'a> TorrentMetaInfo<'a> {
 
         let piece_length = match info_dict.get("piece length".as_bytes()) {
             Some(v) => match v {
-                bencode::BencodeVal::Int(i) => *i,
+                bencode::BencodeVal::Int {
+                    index: _,
+                    int,
+                    size: _,
+                } => *int,
                 _ => {
                     return Err(From::from("piece length should be an integer"))
                 }
@@ -97,7 +125,11 @@ impl<'a> TorrentMetaInfo<'a> {
 
         let pieces_byte_string = match info_dict.get("pieces".as_bytes()) {
             Some(v) => match v {
-                bencode::BencodeVal::Str(s) => s,
+                bencode::BencodeVal::Str {
+                    index: _,
+                    byte_str,
+                    size: _,
+                } => byte_str,
                 _ => return Err(From::from("pieces should be a byte string")),
             },
             None => {
@@ -112,23 +144,38 @@ impl<'a> TorrentMetaInfo<'a> {
             pieces.push(&pieces_byte_string[i * 20..(i + 1) * 20]);
         }
 
-        let length = if let Some(bencode::BencodeVal::Int(i)) =
-            info_dict.get("length".as_bytes())
+        let length = if let Some(bencode::BencodeVal::Int {
+            index: _,
+            size: _,
+            int,
+        }) = info_dict.get("length".as_bytes())
         {
-            Some(*i)
+            Some(*int)
         } else {
             None
         };
 
-        let files = if let Some(bencode::BencodeVal::List(l)) =
-            info_dict.get("files".as_bytes())
+        let files = if let Some(bencode::BencodeVal::List {
+            index: _,
+            size: _,
+            list,
+        }) = info_dict.get("files".as_bytes())
         {
             let mut vector = Vec::new();
-            for elem in l {
-                if let bencode::BencodeVal::Dict(d) = elem {
-                    let file_length = match d.get("length".as_bytes()) {
+            for elem in list {
+                if let bencode::BencodeVal::Dict {
+                    index: _,
+                    size: _,
+                    dict,
+                } = elem
+                {
+                    let file_length = match dict.get("length".as_bytes()) {
                         Some(v) => match v {
-                            bencode::BencodeVal::Int(i) => *i,
+                            bencode::BencodeVal::Int {
+                                index: _,
+                                size: _,
+                                int,
+                            } => *int,
                             _ => {
                                 return Err(From::from(
                                     "file length should be an integer",
@@ -142,9 +189,13 @@ impl<'a> TorrentMetaInfo<'a> {
                         }
                     };
 
-                    let file_path = match d.get("path".as_bytes()) {
+                    let file_path = match dict.get("path".as_bytes()) {
                         Some(v) => match v {
-                            bencode::BencodeVal::List(l) => l,
+                            bencode::BencodeVal::List {
+                                index: _,
+                                size: _,
+                                list,
+                            } => list,
                             _ => {
                                 return Err(From::from(
                                     "file path should be a list",
@@ -161,9 +212,11 @@ impl<'a> TorrentMetaInfo<'a> {
                     let file_path: Vec<&str> = file_path
                         .iter()
                         .map(|x| match x {
-                            bencode::BencodeVal::Str(s) => {
-                                str::from_utf8(s).unwrap_or("")
-                            }
+                            bencode::BencodeVal::Str {
+                                index: _,
+                                size: _,
+                                byte_str,
+                            } => str::from_utf8(byte_str).unwrap_or(""),
                             _ => "",
                         })
                         .collect();
@@ -187,6 +240,7 @@ impl<'a> TorrentMetaInfo<'a> {
                 pieces: pieces,
                 length: length,
                 files: files,
+                hash: info_hash,
             },
         })
     }

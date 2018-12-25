@@ -3,25 +3,57 @@ use std::fmt;
 use std::str;
 
 pub enum BencodeVal<'a> {
-    Int(i64),
-    Str(&'a [u8]),
-    List(Vec<BencodeVal<'a>>),
-    Dict(HashMap<&'a [u8], BencodeVal<'a>>),
+    Int {
+        index: usize,
+        int: i64,
+        size: usize,
+    },
+    Str {
+        index: usize,
+        byte_str: &'a [u8],
+        size: usize,
+    },
+    List {
+        index: usize,
+        list: Vec<BencodeVal<'a>>,
+        size: usize,
+    },
+    Dict {
+        index: usize,
+        dict: HashMap<&'a [u8], BencodeVal<'a>>,
+        size: usize,
+    },
 }
 
 impl<'a> fmt::Debug for BencodeVal<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            BencodeVal::Int(i) => write!(f, "{}", i),
-            BencodeVal::Str(s) => match str::from_utf8(s) {
-                Ok(s) => write!(f, "{:?}", s),
-                _ => write!(f, "{:?}", s),
+            BencodeVal::Int {
+                index: _,
+                size: _,
+                int,
+            } => write!(f, "{}", int),
+            BencodeVal::Str {
+                index: _,
+                size: _,
+                byte_str,
+            } => match str::from_utf8(byte_str) {
+                Ok(byte_str) => write!(f, "{:?}", byte_str),
+                _ => write!(f, "{:?}", byte_str),
             },
-            BencodeVal::List(l) => write!(f, "{:?}", l),
-            BencodeVal::Dict(d) => {
+            BencodeVal::List {
+                index: _,
+                size: _,
+                list,
+            } => write!(f, "{:?}", list),
+            BencodeVal::Dict {
+                index: _,
+                size: _,
+                dict,
+            } => {
                 write!(f, "{{")?;
                 let mut first = true;
-                for (key, val) in d.iter() {
+                for (key, val) in dict.iter() {
                     if first {
                         first = false;
                     } else {
@@ -35,25 +67,20 @@ impl<'a> fmt::Debug for BencodeVal<'a> {
     }
 }
 
-struct BdecodeContext<'a> {
-    val: BencodeVal<'a>,
-    index: usize,
-}
-
 pub fn decode(bytes: &[u8]) -> Result<BencodeVal, Box<std::error::Error>> {
     match bytes.iter().next() {
         Some(&c) => match c {
-            b'i' => Ok(decode_int(bytes)?.val),
-            b'l' => Ok(decode_list(bytes)?.val),
-            b'd' => Ok(decode_dict(bytes)?.val),
-            _ if c.is_ascii_digit() => Ok(decode_str(bytes)?.val),
+            b'i' => Ok(decode_int(bytes)?),
+            b'l' => Ok(decode_list(bytes)?),
+            b'd' => Ok(decode_dict(bytes)?),
+            _ if c.is_ascii_digit() => Ok(decode_str(bytes)?),
             _ => Err(From::from(format!("unexpected char: {}", c as char))),
         },
         None => Err(From::from("reached eof")),
     }
 }
 
-fn decode_int(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
+fn decode_int(bytes: &[u8]) -> Result<BencodeVal, Box<std::error::Error>> {
     if bytes.len() < 3 {
         return Err(From::from("reached eof"));
     }
@@ -66,9 +93,10 @@ fn decode_int(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
     }
 
     if &bytes[1..3] == b"0e" {
-        return Ok(BdecodeContext {
-            val: BencodeVal::Int(0),
-            index: 3,
+        return Ok(BencodeVal::Int {
+            index: 0,
+            int: 0,
+            size: 3,
         });
     }
 
@@ -92,16 +120,17 @@ fn decode_int(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
             .unwrap()
             .parse::<i64>()
             .unwrap();
-        return Ok(BdecodeContext {
-            val: BencodeVal::Int(integer),
-            index: index + 3,
+        return Ok(BencodeVal::Int {
+            index: 0,
+            int: integer,
+            size: index + 3,
         });
     }
 
     Err(From::from("reached eof"))
 }
 
-fn decode_str(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
+fn decode_str(bytes: &[u8]) -> Result<BencodeVal, Box<std::error::Error>> {
     if bytes.len() < 2 {
         return Err(From::from("reached eof"));
     }
@@ -120,16 +149,17 @@ fn decode_str(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
             return Err(From::from("reached eof"));
         }
 
-        return Ok(BdecodeContext {
-            val: BencodeVal::Str(&bytes[index + 1..index + len + 1]),
-            index: index + len + 1,
+        return Ok(BencodeVal::Str {
+            index: 0,
+            byte_str: &bytes[index + 1..index + len + 1],
+            size: index + len + 1,
         });
     }
 
     Err(From::from("reached eof"))
 }
 
-fn decode_list(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
+fn decode_list(bytes: &[u8]) -> Result<BencodeVal, Box<std::error::Error>> {
     if bytes.len() < 2 {
         return Err(From::from("reached eof"));
     }
@@ -142,9 +172,10 @@ fn decode_list(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
     }
 
     if bytes[1] == b'e' {
-        return Ok(BdecodeContext {
-            val: BencodeVal::List(Vec::new()),
-            index: 2,
+        return Ok(BencodeVal::List {
+            index: 0,
+            list: Vec::new(),
+            size: 2,
         });
     }
 
@@ -155,15 +186,16 @@ fn decode_list(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
             return Err(From::from("reached eof"));
         }
 
-        let context = match bytes[index] {
+        let val = match bytes[index] {
             b'i' => decode_int(&bytes[index..])?,
             b'l' => decode_list(&bytes[index..])?,
             b'd' => decode_dict(&bytes[index..])?,
             c if c.is_ascii_digit() => decode_str(&bytes[index..])?,
             b'e' => {
-                return Ok(BdecodeContext {
-                    val: BencodeVal::List(v),
-                    index: index + 1,
+                return Ok(BencodeVal::List {
+                    index: 0,
+                    list: v,
+                    size: index + 1,
                 });
             }
             _ => {
@@ -174,12 +206,63 @@ fn decode_list(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
             }
         };
 
-        v.push(context.val);
-        index += context.index;
+        let (size, actual_val) = match val {
+            BencodeVal::Int {
+                index: _,
+                int,
+                size,
+            } => (
+                size,
+                BencodeVal::Int {
+                    index: index,
+                    int: int,
+                    size: size,
+                },
+            ),
+            BencodeVal::Str {
+                index: _,
+                byte_str,
+                size,
+            } => (
+                size,
+                BencodeVal::Str {
+                    index: index,
+                    byte_str: byte_str,
+                    size: size,
+                },
+            ),
+            BencodeVal::List {
+                index: _,
+                list,
+                size,
+            } => (
+                size,
+                BencodeVal::List {
+                    index: index,
+                    list: list,
+                    size: size,
+                },
+            ),
+            BencodeVal::Dict {
+                index: _,
+                dict,
+                size,
+            } => (
+                size,
+                BencodeVal::Dict {
+                    index: index,
+                    dict: dict,
+                    size: size,
+                },
+            ),
+        };
+
+        v.push(actual_val);
+        index += size;
     }
 }
 
-fn decode_dict(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
+fn decode_dict(bytes: &[u8]) -> Result<BencodeVal, Box<std::error::Error>> {
     if bytes.len() < 2 {
         return Err(From::from("reached eof"));
     }
@@ -192,9 +275,10 @@ fn decode_dict(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
     }
 
     if bytes[1] == b'e' {
-        return Ok(BdecodeContext {
-            val: BencodeVal::Dict(HashMap::new()),
-            index: 2,
+        return Ok(BencodeVal::Dict {
+            index: 0,
+            dict: HashMap::new(),
+            size: 2,
         });
     }
 
@@ -207,9 +291,10 @@ fn decode_dict(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
         }
 
         if bytes[index] == b'e' {
-            return Ok(BdecodeContext {
-                val: BencodeVal::Dict(d),
-                index: index + 1,
+            return Ok(BencodeVal::Dict {
+                index: 0,
+                dict: d,
+                size: index + 1,
             });
         }
 
@@ -220,19 +305,24 @@ fn decode_dict(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
             )));
         }
 
-        let context = decode_str(&bytes[index..])?;
-        let key = match context.val {
-            BencodeVal::Str(s) => s,
+        let val = decode_str(&bytes[index..])?;
+        let key = match val {
+            BencodeVal::Str {
+                index: _,
+                size,
+                byte_str,
+            } => {
+                index += size;
+                byte_str
+            }
             _ => return Err(From::from("not possible")),
         };
-
-        index += context.index;
 
         if index >= bytes.len() {
             return Err(From::from("reached eof"));
         }
 
-        let context = match bytes[index] {
+        let val = match bytes[index] {
             b'i' => decode_int(&bytes[index..])?,
             b'l' => decode_list(&bytes[index..])?,
             b'd' => decode_dict(&bytes[index..])?,
@@ -245,7 +335,58 @@ fn decode_dict(bytes: &[u8]) -> Result<BdecodeContext, Box<std::error::Error>> {
             }
         };
 
-        d.insert(key, context.val);
-        index += context.index;
+        let (size, actual_val) = match val {
+            BencodeVal::Int {
+                index: _,
+                int,
+                size,
+            } => (
+                size,
+                BencodeVal::Int {
+                    index: index,
+                    int: int,
+                    size: size,
+                },
+            ),
+            BencodeVal::Str {
+                index: _,
+                byte_str,
+                size,
+            } => (
+                size,
+                BencodeVal::Str {
+                    index: index,
+                    byte_str: byte_str,
+                    size: size,
+                },
+            ),
+            BencodeVal::List {
+                index: _,
+                list,
+                size,
+            } => (
+                size,
+                BencodeVal::List {
+                    index: index,
+                    list: list,
+                    size: size,
+                },
+            ),
+            BencodeVal::Dict {
+                index: _,
+                dict,
+                size,
+            } => (
+                size,
+                BencodeVal::Dict {
+                    index: index,
+                    dict: dict,
+                    size: size,
+                },
+            ),
+        };
+
+        d.insert(key, actual_val);
+        index += size;
     }
 }

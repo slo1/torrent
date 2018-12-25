@@ -5,3 +5,6 @@ authors = ["stephen <26316200+slo1@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
+sha1 = "0.6.0"
+reqwest = "0.9.5"
+url = "1.7.2"
