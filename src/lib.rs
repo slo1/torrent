@@ -4,9 +4,10 @@ use std::fmt;
 use std::str;
 
 mod bencode;
+pub mod download;
 
 pub struct File {
-    pub length: i64,
+    pub length: u64,
     pub path: String,
 }
 
@@ -19,9 +20,9 @@ impl fmt::Debug for File {
 
 pub struct Info<'a> {
     pub name: &'a str,
-    pub piece_length: i64,
-    pub pieces: Vec<&'a [u8]>,
-    pub length: Option<i64>,
+    pub piece_length: u64,
+    pub pieces: Vec<[u8; 20]>,
+    pub length: Option<u64>,
     pub files: Option<Vec<File>>,
     pub hash: [u8; 20],
 }
@@ -141,7 +142,9 @@ impl<'a> TorrentMetaInfo<'a> {
 
         let mut pieces = Vec::new();
         for i in 0..pieces_byte_string.len() / 20 {
-            pieces.push(&pieces_byte_string[i * 20..(i + 1) * 20]);
+            let mut a: [u8; 20] = Default::default();
+            a.copy_from_slice(&pieces_byte_string[i * 20..(i + 1) * 20]);
+            pieces.push(a);
         }
 
         let length = if let Some(bencode::BencodeVal::Int {
@@ -150,7 +153,7 @@ impl<'a> TorrentMetaInfo<'a> {
             int,
         }) = info_dict.get("length".as_bytes())
         {
-            Some(*int)
+            Some(*int as u64)
         } else {
             None
         };
@@ -175,7 +178,7 @@ impl<'a> TorrentMetaInfo<'a> {
                                 index: _,
                                 size: _,
                                 int,
-                            } => *int,
+                            } => *int as u64,
                             _ => {
                                 return Err(From::from(
                                     "file length should be an integer",
@@ -235,11 +238,11 @@ impl<'a> TorrentMetaInfo<'a> {
         Ok(TorrentMetaInfo {
             announce: announce,
             info: Info {
-                name: name,
-                piece_length: piece_length,
-                pieces: pieces,
-                length: length,
-                files: files,
+                name,
+                piece_length: piece_length as u64,
+                pieces,
+                length,
+                files,
                 hash: info_hash,
             },
         })
